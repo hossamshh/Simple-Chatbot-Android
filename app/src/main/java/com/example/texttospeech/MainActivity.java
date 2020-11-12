@@ -132,7 +132,7 @@ public class MainActivity extends AppCompatActivity {
         Matcher matcher = regex.matcher(eventTime);
         if(matcher.find()){
             int time = Integer.parseInt(matcher.group());
-            if(eventTime.charAt(eventTime.length()-2) == 'p') time += 12;
+            if(eventTime.contains("p")) time += 12;
             return time;
         }
         else return 0;
@@ -144,7 +144,7 @@ public class MainActivity extends AppCompatActivity {
         String eventName = inputs[parsingIndex++];
         int month = getMonthNumber(inputs[parsingIndex++]);
         int day = getDayNumber(inputs[parsingIndex++]);
-        int eventTime = getTime(inputs[inputs.length-1]);
+        int eventTime = getTime(inputs[inputs.length-2] + inputs[inputs.length-1]);
 
         Log.d(TAG, "parseInput: " + eventName + ", " + month + ", " + day + ", " + eventTime);
 
@@ -172,9 +172,12 @@ public class MainActivity extends AppCompatActivity {
                 for(String s: results)
                     Log.d("dev", "Speech: " + s);
 
+                speechInput = results.get(0);
+                parseInput();
+
             }
         }
-        speechInput = "Meeting december 2nd at 5pm";
-        parseInput();
+//        speechInput = "Meeting december 2nd at 5 p.m.";
+//        parseInput();
     }
 }
