@@ -1,20 +1,27 @@
 package com.example.texttospeech;
 
 import androidx.appcompat.app.AppCompatActivity;
-import androidx.constraintlayout.widget.ConstraintLayout;
-import androidx.core.app.NotificationManagerCompat;
+import androidx.core.app.NotificationCompat;
 
-import android.app.Activity;
+import android.app.AlarmManager;
 import android.app.Notification;
+import android.app.NotificationChannel;
+import android.app.NotificationManager;
+import android.app.PendingIntent;
+import android.content.BroadcastReceiver;
+import android.content.ComponentName;
+import android.content.Context;
 import android.content.Intent;
+import android.graphics.Color;
+import android.os.Build;
 import android.os.Bundle;
+import android.os.SystemClock;
 import android.speech.RecognizerIntent;
 import android.speech.tts.TextToSpeech;
 import android.speech.tts.UtteranceProgressListener;
 import android.util.Log;
 import android.view.View;
-import android.widget.Button;
-import android.widget.TextView;
+import android.widget.Toast;
 
 import com.example.texttospeech.databinding.ActivityMainBinding;
 
@@ -22,24 +29,24 @@ import java.util.Calendar;
 import java.util.GregorianCalendar;
 import java.util.List;
 import java.util.Locale;
+import java.util.TimeZone;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 public class MainActivity extends AppCompatActivity {
     final String TAG = "dev";
+    final int calendarIntentCode = 12412;
 
     TextToSpeech tts;
     final int VOICE_RECOGNITION = 2;
     Intent intent;
     int mostRecentUtteranceID = 0;
     String speechInput = "";
-    TextView textView;
-    String channelID = "channel1";
-    int notificationID = 1;
-    Notification.Builder builder;
-    NotificationManagerCompat notificationManager;
-    ConstraintLayout constraintLayout;
-    Button btn;
+
+    private static final String channelID = "primary_notifications";
+    private NotificationManager notificationManager;
+    private int notificationID = 0;
+
     private ActivityMainBinding binding;
 
     @Override
@@ -53,7 +60,7 @@ public class MainActivity extends AppCompatActivity {
         binding.button01.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View view) {
-                speakText(getString(R.string.speech_format));
+                speakText(getString(R.string.speech_format), true);
             }
         });
 
@@ -73,9 +80,11 @@ public class MainActivity extends AppCompatActivity {
         intent.putExtra(RecognizerIntent.EXTRA_PROMPT, "Speak!");
         intent.putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 4);
         intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.ENGLISH);
+
+        createNotificationChannel();
     }
 
-    public void speakText(String TTS) {
+    public void speakText(String TTS, final boolean fireSpeechRecognition) {
         tts.speak(TTS, TextToSpeech.QUEUE_ADD, null, mostRecentUtteranceID++ + "");
         tts.setOnUtteranceProgressListener(new UtteranceProgressListener() {
             @Override
@@ -83,7 +92,8 @@ public class MainActivity extends AppCompatActivity {
             }
             @Override
             public void onDone(String s) {
-                startActivityForResult(intent, VOICE_RECOGNITION);
+                if(fireSpeechRecognition)
+                    startActivityForResult(intent, VOICE_RECOGNITION);
             }
             @Override
             public void onError(String s) {
@@ -149,6 +159,7 @@ public class MainActivity extends AppCompatActivity {
         Log.d(TAG, "parseInput: " + eventName + ", " + month + ", " + day + ", " + eventTime);
 
         Calendar cal = new GregorianCalendar();
+        cal.setTimeInMillis(System.currentTimeMillis());
         cal.set(Calendar.MONTH, month);
         cal.set(Calendar.DAY_OF_MONTH, day);
         cal.set(Calendar.HOUR_OF_DAY, eventTime);
@@ -158,7 +169,9 @@ public class MainActivity extends AppCompatActivity {
         intent.setType("vnd.android.cursor.item/event");
         intent.putExtra("beginTime", cal.getTimeInMillis());
         intent.putExtra("title", eventName);
-        startActivity(intent);
+        startActivityForResult(intent, calendarIntentCode);
+
+        scheduleNotification(eventName, cal.getTimeInMillis() - 86400000);
     }
 
     @Override
@@ -170,14 +183,60 @@ public class MainActivity extends AppCompatActivity {
                 float[] confidence = data.getFloatArrayExtra(RecognizerIntent.EXTRA_CONFIDENCE_SCORES);
 
                 for(String s: results)
-                    Log.d("dev", "Speech: " + s);
+                    Log.d(TAG, "Speech: " + s);
 
-                speechInput = results.get(0);
-                parseInput();
+//                speechInput = results.get(0);
+//                parseInput();
 
             }
+            speechInput = "Meeting november 15 at 1 a.m.";
+            parseInput();
         }
-//        speechInput = "Meeting december 2nd at 5 p.m.";
-//        parseInput();
+        else if(requestCode == calendarIntentCode){
+            speakText("Event added successfully", false);
+            Toast.makeText(this, "Event added Successfully!", Toast.LENGTH_LONG).show();
+        }
+        
+    }
+
+    private void createNotificationChannel() {
+        notificationManager = (NotificationManager)getSystemService(NOTIFICATION_SERVICE);
+
+        // create channel on sdk >= 26
+        if(Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            NotificationChannel notificationChannel = new NotificationChannel(channelID, "Event Reminders", NotificationManager.IMPORTANCE_HIGH);
+
+            notificationChannel.enableLights(true);
+            notificationChannel.setLightColor(Color.BLUE);
+            notificationChannel.enableVibration(true);
+            notificationChannel.setDescription("Notify me about calendar events");
+
+            notificationManager.createNotificationChannel(notificationChannel);
+        }
+    }
+
+    private NotificationCompat.Builder getNotificationBuilder(String desc){
+        Intent notificationIntent = new Intent(this, MainActivity.class);
+        PendingIntent pendingNotificationIntent = PendingIntent.getActivity(this, notificationID, notificationIntent, PendingIntent.FLAG_UPDATE_CURRENT);
+        NotificationCompat.Builder notifyBuilder = new NotificationCompat.Builder(this, channelID)
+                .setContentTitle("Event Reminder")
+                .setContentText(desc)
+                .setSmallIcon(R.drawable.ic_alarm)
+                .setContentIntent(pendingNotificationIntent)
+                .setAutoCancel(true);
+        return notifyBuilder;
+    };
+
+    private void scheduleNotification(String desc, long notificationTime) {
+        NotificationCompat.Builder notifyBuilder = getNotificationBuilder(desc);
+        Notification notification = notifyBuilder.build();
+
+        Intent notificationIntent = new Intent(this, MyNotificationPublisher.class);
+        notificationIntent.putExtra(MyNotificationPublisher.NOTIFICATION_ID, notificationID);
+        notificationIntent.putExtra(MyNotificationPublisher.NOTIFICATION, notification);
+        PendingIntent pendingIntent = PendingIntent.getBroadcast(this, notificationID, notificationIntent, PendingIntent.FLAG_UPDATE_CURRENT);
+
+        AlarmManager alarmManager = (AlarmManager) this.getSystemService(Context.ALARM_SERVICE);
+        alarmManager.setExact(AlarmManager.RTC_WAKEUP, notificationTime, pendingIntent);
     }
 }
